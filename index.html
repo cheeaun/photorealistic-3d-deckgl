@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="initial-scale=1, width=device-width" />
+    <title>
+      Deck.GL with Google Maps Photorealistic 3D Tiles demo - lighting with
+      shadows and post-processing effects
+    </title>
+    <style>
+      *,
+      *:before,
+      *:after {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+          Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue',
+          sans-serif;
+      }
+      #map {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background-image: linear-gradient(to top, #1f464b, #b5e3ff, #61b6ff);
+      }
+      .container {
+        position: fixed;
+        top: 16px;
+        top: max(16px, env(safe-area-inset-top));
+        left: 16px;
+        left: max(16px, env(safe-area-inset-left));
+        right: 16px;
+        right: max(16px, env(safe-area-inset-right));
+        bottom: 4px;
+        bottom: max(4px, env(safe-area-inset-bottom));
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: space-between;
+        pointer-events: none;
+      }
+      .hide-controls .container aside,
+      .hide-controls .container main .controls {
+        transition: opacity 0.3s ease;
+        opacity: 0;
+      }
+      aside {
+        background-color: rgba(255, 255, 255, 0.5);
+        backdrop-filter: blur(32px) saturate(2);
+        padding: 8px;
+        border-radius: 16px;
+        pointer-events: auto;
+      }
+      aside input {
+        border: none;
+        appearance: none;
+        padding: 8px;
+        border-radius: 8px;
+        background-color: #fff;
+        color: inherit;
+        font-size: inherit;
+        font-family: inherit;
+        max-width: 95vw;
+      }
+      main {
+        width: 100%;
+        text-align: center;
+      }
+      .controls {
+        background-color: rgba(255, 255, 255, 0.5);
+        backdrop-filter: blur(32px) saturate(2);
+        padding: 8px;
+        border-radius: 16px;
+        text-align: center;
+        pointer-events: auto;
+        display: inline-block;
+      }
+      .controls label {
+        display: inline-block;
+        padding: 4px 8px;
+        background-color: rgba(255, 255, 255, 0.25);
+        border-radius: 16px;
+        margin: 4px;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+      .controls input[type='range'] {
+        width: 100%;
+        max-width: 320px;
+      }
+      #credits {
+        pointer-events: none;
+        text-align: right;
+        padding: 4px;
+        font-size: 14px;
+        color: white;
+        text-shadow: 0 0 2px black, 0 0 2px black, 0 0 2px black, 0 0 2px black,
+          0 0 2px black;
+      }
+      #credits a {
+        color: white;
+        pointer-events: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <div class="container">
+      <aside>
+        <label for="pacViewPlace">Go to a place: </label>
+        <input
+          type="text"
+          id="pacViewPlace"
+          name="pacViewPlace"
+          placeholder="Enter a location..."
+          style="width: 300px"
+        />
+      </aside>
+      <main>
+        <div class="controls">
+          <div id="selected-time-container" hidden>
+            <div id="selected-time"></div>
+            <input
+              type="range"
+              min="0"
+              max="1440"
+              step="5"
+              value="720"
+              id="time-slider"
+            />
+          </div>
+          <div>
+            <label
+              ><input type="checkbox" id="shadow-checkbox" /> Shadows</label
+            >
+            <label>
+              <input type="checkbox" id="postprocess-checkbox" />
+              Post-processing effects
+            </label>
+            <label>
+              <input type="checkbox" id="ink-checkbox" />
+              + Ink effect
+            </label>
+          </div>
+        </div>
+        <footer id="credits"></footer>
+      </main>
+    </div>
+    <script src="https://unpkg.com/deck.gl@8.9.15/dist.min.js"></script>
+    <script src="https://unpkg.com/@luma.gl/shadertools@8.5.20/dist/dist.min.js"></script>
+    <script>
+      // Pls don't use this key, get your own at https://developers.google.com/maps/documentation/javascript/get-api-key
+      const GOOGLE_API_KEY = atob(
+        'QUl6YVN5RE1JOXkzdDVhcmY4T1NtUTd0ZlFhbC1udGVCNnNQVGQw',
+      );
+      const TILESET_URL = 'https://tile.googleapis.com/v1/3dtiles/root.json';
+      const creditsElement = document.getElementById('credits');
+
+      const ambientLight = new deck.AmbientLight({
+        color: [255, 255, 255],
+        intensity: 1,
+      });
+      const sunLight = new deck._SunLight({
+        // timestamp: 1683869915777,
+        color: [255, 255, 255],
+        intensity: 1,
+        _shadow: true,
+      });
+      const lightingEffect = new deck.LightingEffect({
+        ambientLight,
+        sunLight,
+      });
+      lightingEffect.shadowColor = [0, 0, 0, 0];
+      // lightingEffect.shadowColor = [0, 0, 0, 0.5];
+
+      const brightnessContrastEffect = new deck.PostProcessEffect(
+        luma.brightnessContrast,
+        {
+          // contrast: -0.1,
+          // brightness: 0.1,
+          contrast: 0,
+          brightness: 0,
+        },
+      );
+
+      const hueSaturationEffect = new deck.PostProcessEffect(
+        luma.hueSaturation,
+        {
+          hue: 0,
+          saturation: 0,
+        },
+      );
+
+      const vibranceEffect = new deck.PostProcessEffect(luma.vibrance, {
+        // amount: 1,
+        amount: 0,
+      });
+
+      const inkEffect = new deck.PostProcessEffect(luma.ink, {
+        // strength: 0.3,
+        strength: 0,
+      });
+
+      const defaultViewState = {
+        zoom: 16,
+        bearing: 0,
+        pitch: 60,
+        maxZoom: 24,
+        maxPitch: 85,
+      };
+      const theDeck = new deck.DeckGL({
+        container: 'map',
+        initialViewState: {
+          // Marina Bay Sands
+          latitude: 1.283,
+          longitude: 103.8607,
+          ...defaultViewState,
+        },
+        controller: true,
+        onClick: (info, event) => {
+          document.body.classList.toggle('hide-controls');
+        },
+        effects: [
+          lightingEffect,
+          hueSaturationEffect,
+          brightnessContrastEffect,
+          vibranceEffect,
+          inkEffect,
+          // new deck.PostProcessEffect(luma.vibrance, {
+          //   amount: 1,
+          // }),
+          // new deck.PostProcessEffect(luma.triangleBlur, {
+          //   radius: 3,
+          // }),
+          // new deck.PostProcessEffect(luma.ink, {
+          //   strength: 0.3,
+          // }),
+          // new deck.PostProcessEffect(luma.tiltShift, {
+          //   start: [0, 0.5],
+          //   end: [1, 0.5],
+          //   blurRadius: 5,
+          // }),
+          // new deck.PostProcessEffect(luma.colorHalftone, {}),
+        ],
+        layers: [
+          new deck.Tile3DLayer({
+            id: 'google-3d-tiles',
+            data: TILESET_URL,
+            loadOptions: {
+              fetch: {
+                headers: {
+                  'X-GOOG-API-KEY': GOOGLE_API_KEY,
+                },
+              },
+            },
+            onTilesetLoad: (tileset3d) => {
+              tileset3d.options.onTraversalComplete = (selectedTiles) => {
+                const credits = new Set();
+                selectedTiles.forEach((tile) => {
+                  const { copyright } = tile.content.gltf.asset;
+                  copyright.split(';').forEach(credits.add, credits);
+                  creditsElement.innerHTML =
+                    [...credits].join('; ') +
+                    `
+                     &middot; <a href="https://github.com/cheeaun/photorealistic-3d-deckgl" target="_blank">Source code</a>`;
+                });
+                return selectedTiles;
+              };
+            },
+          }),
+        ],
+      });
+
+      const slider = document.getElementById('time-slider');
+      const selectedTimeContainer = document.getElementById(
+        'selected-time-container',
+      );
+      const selectedTime = document.getElementById('selected-time');
+      const shadowCheckbox = document.getElementById('shadow-checkbox');
+      const postprocessCheckbox = document.getElementById(
+        'postprocess-checkbox',
+      );
+      const inkCheckbox = document.getElementById('ink-checkbox');
+
+      shadowCheckbox.addEventListener('change', () => {
+        selectedTimeContainer.hidden = !shadowCheckbox.checked;
+        lightingEffect.shadowColor = shadowCheckbox.checked
+          ? [0, 0, 0, 0.5]
+          : [0, 0, 0, 0];
+        theDeck.redraw(true);
+      });
+
+      postprocessCheckbox.addEventListener('change', () => {
+        const { checked } = postprocessCheckbox;
+        brightnessContrastEffect.setProps({
+          // contrast: checked ? -0.1 : 0,
+          brightness: checked ? 0.2 : 0,
+        });
+        hueSaturationEffect.setProps({
+          saturation: checked ? 0.3 : 0,
+        });
+        vibranceEffect.setProps({
+          amount: checked ? 1 : 0,
+        });
+        theDeck.redraw(true);
+      });
+
+      inkCheckbox.addEventListener('change', () => {
+        inkEffect.setProps({
+          strength: inkCheckbox.checked ? 0.4 : 0,
+        });
+        theDeck.redraw(true);
+      });
+
+      function getTimeFromSliderValue(value) {
+        const hours = Math.floor(value / 60);
+        const minutes = value % 60;
+        const date = new Date();
+        date.setHours(hours, minutes, 0, 0);
+        return date.getTime();
+      }
+
+      slider.addEventListener('input', (e) => {
+        const value = parseInt(e.target.value, 10);
+        const timestamp = getTimeFromSliderValue(value);
+        sunLight.timestamp = timestamp;
+        const date = new Date(timestamp);
+        const hours = date.getHours();
+        const minutes = date.getMinutes();
+        selectedTime.innerHTML = `${hours}:${('' + minutes).padStart(
+          2,
+          '0',
+        )} (Timezone: UTC${date.getTimezoneOffset() < 0 ? '+' : ''}${
+          -date.getTimezoneOffset() / 60
+        })`;
+        theDeck.redraw(true);
+      });
+      slider.dispatchEvent(new Event('input'));
+
+      function initAutocomplete() {
+        const autocomplete = new google.maps.places.Autocomplete(
+          document.getElementById('pacViewPlace'),
+          {
+            fields: ['geometry', 'name'],
+          },
+        );
+        autocomplete.addListener('place_changed', () => {
+          const place = autocomplete.getPlace();
+          const { location } = place.geometry;
+          const { lat, lng } = location;
+          theDeck.setProps({
+            initialViewState: {
+              latitude: lat(),
+              longitude: lng(),
+              ...defaultViewState,
+            },
+          });
+        });
+      }
+
+      // Inject script
+      const script = document.createElement('script');
+      script.src =
+        'https://maps.googleapis.com/maps/api/js?key=' +
+        GOOGLE_API_KEY +
+        '&libraries=places&callback=initAutocomplete';
+      script.defer = true;
+      script.async = true;
+      document.head.appendChild(script);
+    </script>
+  </body>
+</html>
