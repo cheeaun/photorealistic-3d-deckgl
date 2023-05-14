@@ -222,7 +222,10 @@
           longitude: 103.8607,
           ...defaultViewState,
         },
-        controller: true,
+        controller: {
+          touchRotate: true,
+          touchZoom: true,
+        },
         onClick: (info, event) => {
           document.body.classList.toggle('hide-controls');
         },
