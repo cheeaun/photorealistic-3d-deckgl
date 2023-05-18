@@ -207,10 +207,27 @@
         strength: 0,
       });
 
+      function updateHash(viewState) {
+        const { longitude, latitude, zoom, bearing, pitch } = viewState;
+        // replaceState update hash with /lng/lat/zoom/bearing/pitch
+        // If bearing and pitch is zero, exclude bearing from the hash
+        // If pitch is zero, exclude it from the hash
+        const hash = `#/${longitude}/${latitude}/${zoom}/${
+          bearing === 0 && pitch === 0 ? '' : bearing
+        }/${pitch === 0 ? '' : pitch}`;
+        const location = window.location.href.replace(/(#.+)?$/, hash);
+        window.history.replaceState(window.history.state, null, location);
+      }
+      const throttledUpdateHash = throttle(updateHash, (30 * 1000) / 100); // 100 times per 30 seconds
+
+      const hash = window.location.hash.replace(/^#\/?/, '');
+      const [longitude, latitude, zoom, bearing, pitch] = hash
+        .split('/')
+        .map((x) => parseFloat(x));
       const defaultViewState = {
-        zoom: 16,
-        bearing: 0,
-        pitch: 60,
+        zoom: zoom || 16,
+        bearing: bearing || 0,
+        pitch: pitch || 60,
         maxZoom: 24,
         maxPitch: 85,
       };
@@ -218,13 +235,16 @@
         container: 'map',
         initialViewState: {
           // Marina Bay Sands
-          latitude: 1.283,
-          longitude: 103.8607,
+          latitude: latitude || 1.283,
+          longitude: longitude || 103.8607,
           ...defaultViewState,
         },
         controller: {
           touchRotate: true,
           touchZoom: true,
+        },
+        onViewStateChange: ({ viewState }) => {
+          throttledUpdateHash(viewState);
         },
         onClick: (info, event) => {
           document.body.classList.toggle('hide-controls');
@@ -279,6 +299,59 @@
           }),
         ],
       });
+
+      // just-throttle
+      function throttle(fn, interval, options) {
+        var timeoutId = null;
+        var throttledFn = null;
+        var leading = options && options.leading;
+        var trailing = options && options.trailing;
+        if (leading == null) {
+          leading = true; // default
+        }
+        if (trailing == null) {
+          trailing = !leading; //default
+        }
+        if (leading == true) {
+          trailing = false; // forced because there should be invocation per call
+        }
+        var cancel = function () {
+          if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+          }
+        };
+        var flush = function () {
+          var call = throttledFn;
+          cancel();
+          if (call) {
+            call();
+          }
+        };
+        var throttleWrapper = function () {
+          var callNow = leading && !timeoutId;
+          var context = this;
+          var args = arguments;
+          throttledFn = function () {
+            return fn.apply(context, args);
+          };
+          if (!timeoutId) {
+            timeoutId = setTimeout(function () {
+              timeoutId = null;
+              if (trailing) {
+                return throttledFn();
+              }
+            }, interval);
+          }
+          if (callNow) {
+            callNow = false;
+            return throttledFn();
+          }
+        };
+        throttleWrapper.cancel = cancel;
+        throttleWrapper.flush = flush;
+        return throttleWrapper;
+      }
 
       const slider = document.getElementById('time-slider');
       const selectedTimeContainer = document.getElementById(
